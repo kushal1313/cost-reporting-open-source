@@ -10,8 +10,8 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@aws-sdk/client-cost-explorer": "^3.658.1",
-    "@aws-sdk/credential-providers": "^3.658.1",
+    "@aws-sdk/client-cost-explorer": "^3.1141.0",
+    "@aws-sdk/credential-providers": "^3.1141.0",
     "@cost-reporting/connector-core": "*",
     "@cost-reporting/focus-schema": "*"
   },
