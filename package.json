@@ -1,0 +1,42 @@
+{
+  "name": "platform-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open-source platform dashboard. First module: multi-cloud cost reporting, dashboards, and budget alerting (AWS, Azure, GCP, Datadog, Grafana Cloud, Snowflake, Databricks).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_ORG/platform-dashboard.git"
+  },
+  "homepage": "https://github.com/YOUR_ORG/platform-dashboard#readme",
+  "bugs": "https://github.com/YOUR_ORG/platform-dashboard/issues",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/connectors/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:api": "npm run dev -w @cost-reporting/api",
+    "dev:web": "npm run dev -w @cost-reporting/web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @cost-reporting/db",
+    "db:migrate": "npm run db:migrate -w @cost-reporting/db"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.9",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.71.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

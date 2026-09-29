@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/focus-schema" },
+    { "path": "../../packages/connectors/core" },
+    { "path": "../../packages/connectors/aws" },
+    { "path": "../../packages/connectors/datadog" },
+    { "path": "../../packages/connectors/grafana-cloud" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/notifications" }
+  ]
+}

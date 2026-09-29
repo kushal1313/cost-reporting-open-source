@@ -1,0 +1,19 @@
+{
+  "name": "@cost-reporting/notifications",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "nodemailer": "^10.0.12"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@cost-reporting/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "dotenv -e ../../.env -- node dist/index.js",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@cost-reporting/connector-aws": "*",
+    "@cost-reporting/connector-core": "*",
+    "@cost-reporting/connector-datadog": "*",
+    "@cost-reporting/connector-grafana-cloud": "*",
+    "@cost-reporting/db": "*",
+    "@cost-reporting/focus-schema": "*",
+    "@cost-reporting/notifications": "*",
+    "@fastify/cors": "^11.3.0",
+    "fastify": "^5.12.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "dotenv-cli": "^7.4.2",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

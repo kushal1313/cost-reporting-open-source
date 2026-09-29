@@ -1,0 +1,161 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users                 User[]
+  connectorInstances    ConnectorInstance[]
+  budgets               Budget[]
+  notificationChannels  NotificationChannel[]
+}
+
+enum Role {
+  ADMIN
+  BILLING_ADMIN
+  VIEWER
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  name           String?
+  role           Role         @default(VIEWER)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+enum ConnectorStatus {
+  PENDING
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+// One instance per connected account/org for a provider, e.g. "AWS - Prod payer account".
+model ConnectorInstance {
+  id              String          @id @default(cuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  provider        String // matches FOCUS ProviderName, e.g. "AWS", "Datadog"
+  name            String
+  // AES-256-GCM encrypted JSON blob of provider credentials/config.
+  encryptedConfig String
+  status          ConnectorStatus @default(PENDING)
+  lastSyncAt      DateTime?
+  lastSyncError   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  costRecords CostRecord[]
+
+  @@index([organizationId])
+}
+
+// One row per normalized FOCUS charge line.
+model CostRecord {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  connectorInstanceId String
+  connectorInstance   ConnectorInstance @relation(fields: [connectorInstanceId], references: [id], onDelete: Cascade)
+
+  billedCost         Decimal  @db.Decimal(18, 6)
+  effectiveCost      Decimal  @db.Decimal(18, 6)
+  billingCurrency    String
+  chargePeriodStart  DateTime
+  chargePeriodEnd    DateTime
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  providerName       String
+  billingAccountId   String
+  billingAccountName String?
+  subAccountId       String?
+  subAccountName     String?
+  serviceCategory    String
+  serviceName        String
+  chargeCategory     String
+  chargeDescription  String?
+  resourceId         String?
+  resourceName       String?
+  resourceType       String?
+  regionId           String?
+  regionName         String?
+  tags               Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, chargePeriodStart])
+  @@index([connectorInstanceId, chargePeriodStart])
+  @@index([providerName])
+}
+
+enum BudgetPeriod {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model Budget {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  amount         Decimal      @db.Decimal(18, 2)
+  currency       String       @default("USD")
+  period         BudgetPeriod @default(MONTHLY)
+  // Filter applied to CostRecord before summing, e.g. { "providerName": "AWS" } or { "tags.team": "platform" }.
+  scopeFilter    Json         @default("{}")
+  createdAt      DateTime     @default(now())
+
+  alertRules AlertRule[]
+
+  @@index([organizationId])
+}
+
+model NotificationChannel {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  type            String // "slack" | "email" | "webhook"
+  name            String
+  // AES-256-GCM encrypted JSON blob, e.g. { "webhookUrl": "..." } or { "to": "..." }.
+  encryptedConfig String
+  createdAt       DateTime @default(now())
+
+  alertRules AlertRule[]
+
+  @@index([organizationId])
+}
+
+enum AlertCondition {
+  THRESHOLD_PERCENT
+  FORECASTED_OVERSPEND
+  ANOMALY_SPIKE
+}
+
+model AlertRule {
+  id                    String               @id @default(cuid())
+  budgetId              String
+  budget                Budget               @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  notificationChannelId String
+  notificationChannel   NotificationChannel  @relation(fields: [notificationChannelId], references: [id], onDelete: Cascade)
+  condition             AlertCondition       @default(THRESHOLD_PERCENT)
+  // Required when condition is THRESHOLD_PERCENT, e.g. 80 fires at 80% of budget consumed.
+  thresholdPercent      Int?
+  createdAt             DateTime             @default(now())
+  lastTriggeredAt       DateTime?
+
+  @@index([budgetId])
+}
