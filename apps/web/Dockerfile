@@ -1,6 +1,6 @@
 # Run `docker build -f apps/web/Dockerfile .` from the repo root (this is how
 # infra/docker-compose.yml invokes it) since the workspace needs the full monorepo.
-FROM node:20-alpine
+FROM node:26-alpine
 WORKDIR /app
 
 COPY . .
