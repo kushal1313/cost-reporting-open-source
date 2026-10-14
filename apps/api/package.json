@@ -17,7 +17,7 @@
     "@cost-reporting/db": "*",
     "@cost-reporting/focus-schema": "*",
     "@cost-reporting/notifications": "*",
-    "@fastify/cors": "^11.3.0",
+    "@fastify/cors": "^11.3.1",
     "fastify": "^5.12.5",
     "zod": "^3.23.8"
   },

@@ -10,7 +10,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
-    "nodemailer": "^10.0.12"
+    "nodemailer": "^10.1.0"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.2",
