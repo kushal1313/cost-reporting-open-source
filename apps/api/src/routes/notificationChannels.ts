@@ -34,7 +34,10 @@ export async function notificationChannelRoutes(app: FastifyInstance) {
 
   app.delete("/notification-channels/:id", async (req, reply) => {
     const { id } = z.object({ id: z.string() }).parse(req.params);
-    await prisma.notificationChannel.delete({ where: { id } });
+    const { organizationId } = z.object({ organizationId: z.string() }).parse(req.query);
+    // Scoped to the caller's org so an id alone can't delete another org's channel.
+    const { count } = await prisma.notificationChannel.deleteMany({ where: { id, organizationId } });
+    if (count === 0) return reply.code(404).send({ error: "Notification channel not found" });
     return reply.code(204).send();
   });
 }

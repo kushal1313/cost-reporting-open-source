@@ -15,7 +15,7 @@ npm run dev:api   # terminal 1
 npm run dev:web   # terminal 2
 ```
 
-See the [README](README.md) for the full walkthrough, including how to set up a real cloud connector.
+See the [README](README.md#getting-started) for the full walkthrough, and [Setting up connectors](README.md#setting-up-connectors) for the credentials and config each provider needs.
 
 ## Before opening a PR
 
@@ -36,7 +36,7 @@ All three run in CI (`.github/workflows/ci.yml`); a PR won't merge if they fail.
 
 ## Adding a new cost connector
 
-This is the most common kind of contribution. See the "Adding a new provider" section in the [README](README.md#adding-a-new-provider) — implement the `CostConnector` interface from `packages/connectors/core`, mapping the provider's billing data into `FocusRecord`s (the [FOCUS spec](https://focus.finops.org/)). [`packages/connectors/aws`](packages/connectors/aws) is the fullest reference implementation.
+This is the most common kind of contribution. See the "Adding a new provider" section in the [README](README.md#adding-a-new-provider) — implement the `CostConnector` interface from `packages/connectors/core`, mapping the provider's billing data into `FocusRecord`s (the [FOCUS spec](https://focus.finops.org/)). [`packages/connectors/aws`](packages/connectors/aws) is the fullest reference implementation. For a connector fed by uploaded exports instead of an API, see [`packages/connectors/chatgpt-enterprise`](packages/connectors/chatgpt-enterprise). When you add a connector, document what it needs under [Setting up connectors](README.md#setting-up-connectors).
 
 ## Testing
 

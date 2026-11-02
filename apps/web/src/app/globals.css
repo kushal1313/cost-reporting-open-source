@@ -113,6 +113,7 @@ h1 {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
+  overflow-x: auto;
 }
 
 .card h2 {
@@ -194,7 +195,8 @@ textarea {
   min-height: 90px;
 }
 
-button {
+button,
+.button {
   background: linear-gradient(135deg, var(--accent-2), var(--accent-strong));
   border: none;
   border-radius: 7px;
@@ -210,7 +212,8 @@ button {
     box-shadow 0.12s ease;
 }
 
-button:hover {
+button:hover,
+.button:hover {
   filter: brightness(1.08);
   box-shadow: 0 6px 18px rgba(255, 61, 0, 0.32);
 }
@@ -368,4 +371,77 @@ button.secondary:hover {
   font-size: 13px;
   padding: 8px;
   margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.kpi {
+  flex: 1 1 160px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.kpi strong {
+  display: block;
+  font-size: 1.4em;
+  color: var(--text);
+}
+
+/* A <label> wrapping a hidden file input, styled as a button. */
+label.button {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.range-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented button {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: 500;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button.active {
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+
+.range-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
 }

@@ -62,7 +62,7 @@ export default function BudgetsPage() {
       setBudgets(list);
       list.forEach((b) => {
         api
-          .get<BudgetStatus>(`/budgets/${b.id}/status`)
+          .get<BudgetStatus>(`/budgets/${b.id}/status?organizationId=${orgId}`)
           .then((s) => setStatuses((prev) => ({ ...prev, [b.id]: s })));
       });
     });
@@ -106,20 +106,22 @@ export default function BudgetsPage() {
     notificationChannelId: string,
     thresholdPercent: number,
   ) {
-    await api.post(`/budgets/${budgetId}/alert-rules`, {
+    if (!organizationId) return;
+    await api.post(`/budgets/${budgetId}/alert-rules?organizationId=${organizationId}`, {
       notificationChannelId,
       condition: "THRESHOLD_PERCENT",
       thresholdPercent,
     });
-    if (organizationId) refresh(organizationId);
+    refresh(organizationId);
   }
 
   async function handleEvaluateNow() {
+    if (!organizationId) return;
     setEvaluating(true);
     setEvaluateMessage(null);
     try {
       const results = await api.post<Array<{ budgetId: string; spend: number; percentUsed: number }>>(
-        "/budgets/evaluate",
+        `/budgets/evaluate?organizationId=${organizationId}`,
         {},
       );
       setEvaluateMessage(

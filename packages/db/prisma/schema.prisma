@@ -56,10 +56,19 @@ model ConnectorInstance {
   status          ConnectorStatus @default(PENDING)
   lastSyncAt      DateTime?
   lastSyncError   String?
+  // Seat plan for seat-licensed products (Claude Enterprise, ChatGPT Enterprise).
+  // Neither vendor reports seat fees per user, so the fee comes from the
+  // contract: when set, each sync books price × seats as a monthly "Purchase"
+  // cost row. seatCount null means "ask the connector" (e.g. Claude's
+  // assigned_seat_count).
+  seatPricePerMonth Decimal?      @db.Decimal(18, 2)
+  seatCount         Int?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  costRecords CostRecord[]
+  costRecords  CostRecord[]
+  groupCosts   GroupCost[]
+  userActivity UserActivity[]
 
   @@index([organizationId])
 }
@@ -93,12 +102,58 @@ model CostRecord {
   regionId           String?
   regionName         String?
   tags               Json     @default("{}")
+  // FOCUS x_ extension columns: the person a charge is attributed to, for
+  // per-user AI tools. Null for infrastructure costs and unattributed usage.
+  userId             String?
+  userEmail          String?
+  userName           String?
 
   createdAt DateTime @default(now())
 
   @@index([organizationId, chargePeriodStart])
   @@index([connectorInstanceId, chargePeriodStart])
   @@index([providerName])
+  @@index([organizationId, providerName, userId])
+}
+
+// Cost per group/team, kept apart from CostRecord because providers may report
+// it with any-membership semantics (Claude: a user in several teams counts in
+// full toward each), so these rows can sum to more than the true total and must
+// never be added into it.
+model GroupCost {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  connectorInstanceId String
+  connectorInstance   ConnectorInstance @relation(fields: [connectorInstanceId], references: [id], onDelete: Cascade)
+  providerName        String
+  groupId             String? // null = users in no group
+  groupName           String?
+  chargePeriodStart   DateTime
+  chargePeriodEnd     DateTime
+  effectiveCost       Decimal           @db.Decimal(18, 6)
+  billingCurrency     String
+
+  @@index([organizationId, providerName, chargePeriodStart])
+  @@index([connectorInstanceId, chargePeriodStart])
+}
+
+// Daily per-user activity, used to rank people when a product reports no
+// per-user dollars (e.g. seat-only plans).
+model UserActivity {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  connectorInstanceId String
+  connectorInstance   ConnectorInstance @relation(fields: [connectorInstanceId], references: [id], onDelete: Cascade)
+  providerName        String
+  date                DateTime // UTC midnight of the day
+  userId              String
+  userEmail           String?
+  userName            String?
+  messageCount        Int               @default(0)
+  sessionCount        Int               @default(0)
+
+  @@index([organizationId, providerName, date])
+  @@index([connectorInstanceId, date])
 }
 
 enum BudgetPeriod {

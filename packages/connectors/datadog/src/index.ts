@@ -56,12 +56,15 @@ function monthStamp(date: Date): string {
   return date.toISOString().slice(0, 7); // YYYY-MM
 }
 
-/** Every first-of-month between range.start and range.end, inclusive. */
+/**
+ * Every first-of-month whose month overlaps the half-open range [start, end).
+ * A range ending exactly at midnight on the 1st doesn't include that month —
+ * matching the sync service's delete window, so it isn't inserted twice.
+ */
 function monthsInRange(range: DateRange): Date[] {
   const months: Date[] = [];
   let cursor = new Date(Date.UTC(range.start.getUTCFullYear(), range.start.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(range.end.getUTCFullYear(), range.end.getUTCMonth(), 1));
-  while (cursor <= end) {
+  while (cursor < range.end) {
     months.push(cursor);
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
   }

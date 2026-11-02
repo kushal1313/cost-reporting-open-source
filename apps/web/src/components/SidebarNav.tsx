@@ -4,11 +4,23 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { CONNECTORS_CHANGED } from "../lib/appEvents";
+import { providerDisplayName } from "../lib/providers";
 import { useOrganization } from "../lib/useOrganization";
 
 interface ConnectorInstance {
   id: string;
   provider: string;
+  lastSyncAt: string | null;
+}
+
+/**
+ * A provider gets its own dashboard link only once it's actually integrated:
+ * at least one connector for it has synced successfully, so there's data to
+ * show. Added-but-never-synced connectors stay on the Connectors page only.
+ */
+function integratedProviders(connectors: ConnectorInstance[]): string[] {
+  return [...new Set(connectors.filter((c) => c.lastSyncAt !== null).map((c) => c.provider))].sort();
 }
 
 export function SidebarNav() {
@@ -20,9 +32,18 @@ export function SidebarNav() {
 
   useEffect(() => {
     if (!organizationId) return;
-    api.get<ConnectorInstance[]>(`/connectors?organizationId=${organizationId}`).then((connectors) => {
-      setProviders([...new Set(connectors.map((c) => c.provider))].sort());
-    });
+    let cancelled = false;
+    function load() {
+      api.get<ConnectorInstance[]>(`/connectors?organizationId=${organizationId}`).then((connectors) => {
+        if (!cancelled) setProviders(integratedProviders(connectors));
+      });
+    }
+    load();
+    window.addEventListener(CONNECTORS_CHANGED, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CONNECTORS_CHANGED, load);
+    };
   }, [organizationId]);
 
   function isDashboardActive(provider?: string) {
@@ -43,7 +64,7 @@ export function SidebarNav() {
             href={`/dashboard?provider=${encodeURIComponent(p)}`}
             className={isDashboardActive(p) ? "active" : undefined}
           >
-            {p} Cost
+            {providerDisplayName(p)} Cost
           </Link>
         ))}
         <Link href="/connectors" className={pathname === "/connectors" ? "active" : undefined}>

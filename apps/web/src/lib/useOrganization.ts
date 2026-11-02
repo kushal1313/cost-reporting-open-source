@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { notifyOrganizationChanged, ORGANIZATION_CHANGED } from "./appEvents";
 
 export interface Organization {
   id: string;
@@ -29,9 +30,20 @@ export function useOrganization() {
     });
   }, []);
 
+  // Each component calling this hook has its own state, so follow selections
+  // made elsewhere (e.g. the sidebar tracking a switch on the Connectors page).
+  useEffect(() => {
+    function onChange(e: Event) {
+      setOrganizationId((e as CustomEvent<string>).detail);
+    }
+    window.addEventListener(ORGANIZATION_CHANGED, onChange);
+    return () => window.removeEventListener(ORGANIZATION_CHANGED, onChange);
+  }, []);
+
   function selectOrganization(id: string) {
     setOrganizationId(id);
     window.localStorage.setItem(STORAGE_KEY, id);
+    notifyOrganizationChanged(id);
   }
 
   async function createOrganization(name: string) {
