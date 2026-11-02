@@ -99,18 +99,18 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d
 
 Add connectors on the **Connectors** page: pick a provider, give the connector a name, and paste its config as JSON. Credentials are checked when you add the connector, and stored encrypted with `ENCRYPTION_KEY` (see [SECURITY.md](SECURITY.md)). Use read-only credentials for every provider.
 
-| Provider                                                       | What you need                                                               | How data gets in |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------- |
-| [Claude Enterprise](#claude-enterprise)                        | Analytics API key                                                           | **Sync**         |
-| [ChatGPT Enterprise / Business](#chatgpt-enterprise--business) | Per-user usage export (CSV) from the ChatGPT admin console                  | **Import CSV**   |
-| [AWS](#aws)                                                    | Read-only IAM role (or SSO profile / access keys) with Cost Explorer access | **Sync**         |
-| [Datadog](#datadog)                                            | API key + Application key                                                   | **Sync**         |
-| [Grafana Cloud](#grafana-cloud)                                | Access policy token with `invoices:read`                                    | **Sync**         |
+| Provider                                                       | What you need                                                                            | How data gets in             |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------- |
+| [Claude Enterprise](#claude-enterprise)                        | Analytics API key                                                                        | **Sync**                     |
+| [ChatGPT Enterprise / Business](#chatgpt-enterprise--business) | Workspace Admin key (Enterprise analytics API: Read), or the admin console's CSV exports | **Sync**, or **Import CSVs** |
+| [AWS](#aws)                                                    | Read-only IAM role (or SSO profile / access keys) with Cost Explorer access              | **Sync**                     |
+| [Datadog](#datadog)                                            | API key + Application key                                                                | **Sync**                     |
+| [Grafana Cloud](#grafana-cloud)                                | Access policy token with `invoices:read`                                                 | **Sync**                     |
 
 ### Sync vs. CSV import
 
 - **Sync** connectors pull from the provider's API on demand. Pick a **Sync range** (last 7 days, 30 days or 3 months) above the connector table, then click **Sync** on the connector. The dashboard can show up to 3 months, so sync 3 months to fill its "Last 3 months" view. Re-syncing a range replaces that range's data; it never duplicates it.
-- **CSV import** connectors (ChatGPT) have no public cost API to pull from. Click **Import CSV** and choose the export file. Its rows replace the stored data for the dates the file covers, so re-importing the same file is safe.
+- **CSV import** connectors (ChatGPT without an admin key) have no API to pull from. Click **Import CSVs** and choose the export files. Each replaces only its own report's stored data for the dates it covers, so re-importing is safe.
 
 Syncs are manual for now (see [Roadmap](#roadmap)).
 
@@ -152,10 +152,45 @@ Docs: [Analytics APIs](https://platform.claude.com/docs/en/manage-claude/analyti
 
 ### ChatGPT Enterprise / Business
 
-OpenAI announced a Cost API for ChatGPT workspace credits but hasn't published a reference for it yet, so this connector imports the admin console's per-user usage export.
+The connector works in one of two modes, picked by its config: **API sync** with a workspace Admin key (Enterprise), or **CSV import** of the admin console's exports when you don't have a key.
 
-1. In the ChatGPT admin console, open **Usage → Export** and export the report **by user**, as CSV.
-2. Add a **ChatGPT Enterprise / Business (CSV import)** connector:
+#### API sync (recommended)
+
+Pulls each person's daily cost and activity from the [ChatGPT Admin API](https://chatgpt.com/public/admin/api-reference)'s Daily Usage endpoint (`GET /v1/analytics/workspaces/{workspace_id}/usage`).
+
+1. In the [OpenAI Admin Console](https://admin.openai.com/credentials?tab=admin-keys), select your workspace, open **Credentials → Admin keys**, and create an admin key with **Custom** permissions:
+   - **Enterprise analytics API: Read** (required): cost, messages and chats per person per day, spend by model, activity by client.
+   - **Users: Read** (optional): the seat count, so a [seat plan](#seat-plans-claude-chatgpt) can leave **Seats** blank.
+   - **Directory: Read** (optional): cost by group.
+
+   Leave everything else at **None**. The secret is shown once.
+
+2. Add a **ChatGPT Enterprise / Business** connector:
+
+```json
+{
+  "adminKey": "sk-admin-...",
+  "workspaceId": "<workspace UUID>",
+  "workspaceName": "Acme",
+  "creditPriceUsd": 0.04
+}
+```
+
+`workspaceId` is your ChatGPT workspace's ID (a UUID). `creditPriceUsd` is your contract's dollars per credit. It's optional here: without it, credits are valued at OpenAI's `estimated_cost_usd`, which uses the overage rate, so it can run higher than committed-credit pricing. Usage OpenAI prices in dollars is taken as is.
+
+3. Pick a sync range and click **Sync**.
+
+What to expect:
+
+- **Cost per person, per day, per client** (ChatGPT web, Codex, …). Usage by people no longer in the workspace is booked unattributed, so totals match the workspace's.
+- **Groups use today's membership.** The API filters group usage by current members, so someone who moved groups counts toward the new one, and someone in several groups counts toward each.
+- **Data delay.** OpenAI refreshes usage within hours and corrects recent days as late data arrives, so re-sync the last 7 days to pick that up.
+- An API-sync connector doesn't accept CSV imports, since a sync replaces everything in its range. To load history from before the API's data, add a separate CSV connector for those dates only.
+
+#### CSV import (no admin key)
+
+1. In the ChatGPT admin console, export the analytics and leaderboard reports as CSV. **Keep the file names the console gives them**: the importer tells several reports apart, and reads the leaderboards' dates, from the name.
+2. Add a **ChatGPT Enterprise / Business** connector with no `adminKey`:
 
 ```json
 {
@@ -164,11 +199,25 @@ OpenAI announced a Cost API for ChatGPT workspace credits but hasn't published a
 }
 ```
 
-`workspaceName` is optional (a label for reports). `creditPriceUsd` is your contract's dollars per credit, and is required only when the export reports credits instead of dollars. Config can't be edited after the connector is created yet, so to change it, remove the connector and add it again.
+`workspaceName` is optional (a label for reports). `creditPriceUsd` is your contract's dollars per credit, needed because the analytics reports count credits, not dollars. (The leaderboards' "Estimated costs" divided by "Credits" gives it.) Config can't be edited after the connector is created yet, so to change it, remove the connector and add it again.
 
-3. Click **Import CSV** on the connector and choose the file.
+3. Click **Import CSVs** on the connector and select all the files at once. Each file is imported on its own and the result lists how each went.
 
-OpenAI doesn't publish the export's column names, so the importer matches common ones (case and spacing don't matter):
+Each report is stored as its own dataset, and importing a report replaces only that report's earlier data for the dates it covers, so re-importing is safe and the reports don't overwrite each other:
+
+| Export file name starts with                                      | Shown as                                  |
+| ----------------------------------------------------------------- | ----------------------------------------- |
+| `analytics-credits-by-product` (or `analytics-overview-credits`)  | **Spend**: total, daily trend, by product |
+| `analytics-credits-by-model`, `analytics-credits-by-metered-item` | By model, by metered item (in dollars)    |
+| `analytics-overview-messages`, `-tokens`, `-active-users`         | Activity by product                       |
+| `leaderboard-users`                                               | Top 10 people                             |
+| `leaderboard-groups`                                              | By group                                  |
+
+Only credits by product counts toward spend and budgets. The other reports break the same spend down differently (credits by model, by person, …), so adding them in would count it several times. Groups overlap (one person can be in several) and leave out people in no group, so they don't add up to the total. Leaderboards cover a whole period, so import them for the same periods each time (e.g. weekly), since a monthly leaderboard replaces the weekly ones it overlaps.
+
+The connector also still accepts a per-user usage export with a date on every row. Don't import it alongside credits by product, since both count the same spend.
+
+For that per-user usage export, OpenAI doesn't publish the column names, so the importer matches common ones (case and spacing don't matter):
 
 | Data                                                   | Accepted column names                                              | Required        |
 | ------------------------------------------------------ | ------------------------------------------------------------------ | --------------- |
@@ -284,7 +333,6 @@ No schema or dashboard changes required — everything downstream already speaks
 ## Roadmap
 
 - Azure, GCP, Snowflake, Databricks connectors
-- ChatGPT Enterprise API sync, once OpenAI publishes its workspace Cost API (CSV import until then)
 - Editing a connector's config after it's created (currently remove and re-add)
 - Security Score module (currently a stub page — see `apps/web/src/app/security`)
 - Auth (OIDC/SSO) + RBAC enforcement

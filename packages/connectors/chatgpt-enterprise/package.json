@@ -7,13 +7,15 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
     "@cost-reporting/connector-core": "*",
     "@cost-reporting/focus-schema": "*"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "tsx": "^4.19.1"
   }
 }

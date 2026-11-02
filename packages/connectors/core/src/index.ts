@@ -25,6 +25,12 @@ export interface CostConnector<TConfig = unknown> {
    */
   readonly ingestion?: "api" | "file";
 
+  /**
+   * Optional: decides ingestion per connector instance, for connectors that
+   * can either sync or import depending on their config. Overrides `ingestion`.
+   */
+  ingestionFor?(config: TConfig): "api" | "file";
+
   /** Stream normalized cost records for the given date range. */
   syncCosts(config: TConfig, range: DateRange): AsyncGenerator<FocusRecord>;
 
@@ -34,11 +40,18 @@ export interface CostConnector<TConfig = unknown> {
   /** Optional: daily per-user activity for the range, for ranking people without per-user dollars. */
   syncUserActivity?(config: TConfig, range: DateRange): AsyncGenerator<UserActivityRecord>;
 
+  /** Optional: usage breakdowns for the range (see UsageMetricRecord), never added into spend. */
+  syncMetrics?(config: TConfig, range: DateRange): AsyncGenerator<UsageMetricRecord>;
+
   /** Optional: current number of paid seats, used when the seat plan leaves seatCount unset. */
   getSeatCount?(config: TConfig): Promise<number | null>;
 
-  /** Required for "file" connectors: parse one uploaded export. */
-  parseImport?(config: TConfig, content: string): ImportResult;
+  /**
+   * Required for "file" connectors: parse one uploaded export. `fileName` is
+   * the uploaded file's name, for exports that carry their report type or
+   * period only there.
+   */
+  parseImport?(config: TConfig, content: string, fileName?: string): ImportResult;
 }
 
 /**
@@ -65,12 +78,61 @@ export interface UserActivityRecord {
   sessionCount: number;
 }
 
+/**
+ * One person's usage over a whole report period, from leaderboard-style
+ * exports. Kept apart from FocusRecords because the same spend is usually
+ * already in the totals from another report, so adding it in would count it
+ * twice.
+ */
+export interface UserUsageRecord {
+  periodStart: Date;
+  periodEnd: Date;
+  userId: string;
+  userEmail?: string;
+  userName?: string;
+  credits?: number;
+  effectiveCost: number;
+  billingCurrency: string;
+  tokens?: number;
+  linesOfCode?: number;
+}
+
+/**
+ * One number for one period, broken down by one dimension (credits by model,
+ * messages by product, …). A breakdown of totals reported elsewhere, so never
+ * added into spend.
+ */
+export interface UsageMetricRecord {
+  dimension: string;
+  key: string;
+  metric: string;
+  periodStart: Date;
+  periodEnd: Date;
+  value: number;
+  /** Dollar value of `value`, when it's a priced quantity such as credits. */
+  effectiveCost?: number;
+}
+
 /** Everything one uploaded export contains, and the half-open range it covers. */
 export interface ImportResult {
+  /**
+   * Which report this file is. An import replaces only earlier data from the
+   * same dataset, so several reports covering the same dates can sit side by
+   * side. Omitted, an import replaces everything the connector stored for the
+   * range.
+   */
+  dataset?: { key: string; label: string };
   range: DateRange;
   costs: FocusRecord[];
   groupCosts: GroupCostRecord[];
   activity: UserActivityRecord[];
+  userUsage?: UserUsageRecord[];
+  metrics?: UsageMetricRecord[];
+}
+
+/** How one instance's data arrives, given its config. */
+export function ingestionOf<TConfig>(connector: CostConnector<TConfig>, config: TConfig): "api" | "file" {
+  return connector.ingestionFor?.(config) ?? connector.ingestion ?? "api";
 }
 
 export class ConnectorRegistry {

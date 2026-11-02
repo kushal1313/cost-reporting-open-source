@@ -8,7 +8,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { ...(init?.body !== undefined && { "Content-Type": "application/json" }), ...init?.headers },
   });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status} ${await res.text()}`);
+    const text = await res.text();
+    // Routes answer failures with { error: "…" } meant for people; show just that when present.
+    let message: unknown;
+    try {
+      message = (JSON.parse(text) as { error?: unknown }).error;
+    } catch {
+      // not JSON
+    }
+    throw new Error(
+      typeof message === "string"
+        ? message
+        : `${init?.method ?? "GET"} ${path} failed: ${res.status} ${text}`,
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

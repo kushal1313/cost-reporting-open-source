@@ -230,6 +230,52 @@ export async function costRoutes(app: FastifyInstance) {
       return { basis: "cost", usageTotal, unattributedCost: unattributed, peopleCount: people.size, rows };
     }
 
+    // Leaderboard exports give each person's spend for a whole period, not per
+    // day, so a period that only partly overlaps the range counts in full.
+    const leaderboard = await prisma.$queryRaw<
+      Array<{
+        user_id: string;
+        email: string | null;
+        name: string | null;
+        cost: number;
+        period_start: Date;
+        period_end: Date;
+      }>
+    >`
+      SELECT "userId" AS user_id, MAX("userEmail") AS email, MAX("userName") AS name,
+             SUM("effectiveCost")::float AS cost,
+             MIN("periodStart") AS period_start, MAX("periodEnd") AS period_end
+      FROM "UserUsage"
+      WHERE "organizationId" = ${organizationId}
+        AND "providerName" = ${provider}
+        AND "periodStart" < ${to}
+        AND "periodEnd" > ${from}
+      GROUP BY 1
+      HAVING SUM("effectiveCost") > 0
+      ORDER BY 4 DESC
+    `;
+    if (leaderboard.length > 0) {
+      const total = leaderboard.reduce((sum, r) => sum + r.cost, 0);
+      return {
+        basis: "cost",
+        usageTotal: total,
+        unattributedCost: 0,
+        peopleCount: leaderboard.length,
+        leaderboardPeriod: {
+          start: new Date(Math.min(...leaderboard.map((r) => r.period_start.getTime()))),
+          end: new Date(Math.max(...leaderboard.map((r) => r.period_end.getTime()))),
+        },
+        rows: leaderboard.slice(0, limit).map((r) => ({
+          userId: r.user_id,
+          email: r.email,
+          name: r.name,
+          effectiveCost: r.cost,
+          share: total > 0 ? r.cost / total : 0,
+          topService: null,
+        })),
+      };
+    }
+
     const activity = await prisma.$queryRaw<
       Array<{
         user_id: string;
@@ -286,6 +332,44 @@ export async function costRoutes(app: FastifyInstance) {
       group: r.group_id === null ? "No group" : (r.group_name ?? r.group_id),
       effectiveCost: r.cost,
       billedCost: r.cost,
+    }));
+  });
+
+  // Usage breakdowns (credits by model, messages by product, …) totalled over
+  // the range. Daily counts like active users don't add up across days, so the
+  // daily average and peak come back too and the UI picks what fits.
+  app.get("/costs/metrics", async (req) => {
+    const { organizationId, from, to, provider } = groupsQuerySchema.parse(req.query);
+    const rows = await prisma.$queryRaw<
+      Array<{
+        dimension: string;
+        key: string;
+        metric: string;
+        total: number;
+        daily_avg: number;
+        daily_max: number;
+        cost: number | null;
+      }>
+    >`
+      SELECT "dimension", "key", "metric",
+             SUM("value")::float AS total, AVG("value")::float AS daily_avg, MAX("value")::float AS daily_max,
+             SUM("effectiveCost")::float AS cost
+      FROM "UsageMetric"
+      WHERE "organizationId" = ${organizationId}
+        AND "providerName" = ${provider}
+        AND "periodStart" < ${to}
+        AND "periodEnd" > ${from}
+      GROUP BY 1, 2, 3
+      ORDER BY 4 DESC
+    `;
+    return rows.map((r) => ({
+      dimension: r.dimension,
+      key: r.key,
+      metric: r.metric,
+      total: r.total,
+      dailyAverage: r.daily_avg,
+      dailyPeak: r.daily_max,
+      effectiveCost: r.cost,
     }));
   });
 

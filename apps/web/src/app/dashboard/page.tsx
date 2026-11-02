@@ -11,6 +11,7 @@ import {
   resolveDateRange,
   type DateRangeValue,
 } from "../../components/DateRangeFilter";
+import { ProductUsageTable, type UsageMetric } from "../../components/ProductUsageTable";
 import { TopPeopleTable, type TopPeople } from "../../components/TopPeopleTable";
 import { api } from "../../lib/api";
 import { providerDisplayName } from "../../lib/providers";
@@ -33,6 +34,7 @@ function DashboardContent({ provider }: { provider?: string }) {
   const [chargeSplit, setChargeSplit] = useState<CostBreakdownRow[]>([]);
   const [groups, setGroups] = useState<CostBreakdownRow[]>([]);
   const [people, setPeople] = useState<TopPeople>({ basis: "none", rows: [] });
+  const [metrics, setMetrics] = useState<UsageMetric[]>([]);
   const [range, setRange] = useState<DateRangeValue>(defaultDateRange);
   const { from, to, label: rangeLabel } = resolveDateRange(range);
   const [loading, setLoading] = useState(true);
@@ -77,14 +79,20 @@ function DashboardContent({ provider }: { provider?: string }) {
             `/costs/users?organizationId=${organizationId}&from=${from}&to=${to}&limit=10${providerParam}`,
           )
         : Promise.resolve<TopPeople>({ basis: "none", rows: [] }),
+      provider
+        ? api.get<UsageMetric[]>(
+            `/costs/metrics?organizationId=${organizationId}&from=${from}&to=${to}${providerParam}`,
+          )
+        : Promise.resolve([]),
     ])
-      .then(([b, a, t, c, g, p]) => {
+      .then(([b, a, t, c, g, p, m]) => {
         setBreakdown(b);
         setAccountBreakdown(a);
         setTrend(t);
         setChargeSplit(c);
         setGroups(g);
         setPeople(p);
+        setMetrics(m);
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,6 +112,15 @@ function DashboardContent({ provider }: { provider?: string }) {
   // A per-user tool is one whose data names people; for those, the account
   // chart is just the org plus a seats row, so groups and people replace it.
   const isPerUserTool = people.basis !== "none" || groups.length > 0;
+  // Priced breakdowns of the same spend (e.g. ChatGPT credits by model), shown in dollars.
+  const pricedBreakdown = (dimension: string): CostBreakdownRow[] =>
+    metrics
+      .filter((m) => m.dimension === dimension && m.effectiveCost != null)
+      .map((m) => ({ group: m.key, effectiveCost: m.effectiveCost ?? 0, billedCost: m.effectiveCost ?? 0 }))
+      .sort((a, b) => b.effectiveCost - a.effectiveCost);
+  const byModel = pricedBreakdown("model");
+  const byMeteredItem = pricedBreakdown("metered_item");
+  const hasProductUsage = metrics.some((m) => m.dimension === "product");
 
   return (
     <div>
@@ -149,6 +166,24 @@ function DashboardContent({ provider }: { provider?: string }) {
               data={seatCost > 0 ? breakdown.filter((r) => r.group !== "Seats") : breakdown}
             />
           </div>
+          {hasProductUsage && (
+            <div className="card">
+              <h2>Activity by product</h2>
+              <ProductUsageTable metrics={metrics} />
+            </div>
+          )}
+          {byModel.length > 0 && (
+            <div className="card">
+              <h2>By model</h2>
+              <CostBreakdownChart data={byModel} />
+            </div>
+          )}
+          {byMeteredItem.length > 0 && (
+            <div className="card">
+              <h2>By metered item</h2>
+              <CostBreakdownChart data={byMeteredItem} />
+            </div>
+          )}
           {isPerUserTool && groups.length > 0 && (
             <div className="card">
               <h2>By group</h2>
@@ -157,6 +192,12 @@ function DashboardContent({ provider }: { provider?: string }) {
                 <p className="muted">
                   Usage only. Someone in several teams counts in full toward each, so groups can add up to
                   more than the total.
+                </p>
+              )}
+              {provider === "OpenAI" && (
+                <p className="muted">
+                  Usage only. Someone in several groups counts toward each, and people in no group aren&apos;t
+                  shown, so groups don&apos;t add up to the total.
                 </p>
               )}
             </div>

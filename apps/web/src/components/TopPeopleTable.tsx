@@ -7,6 +7,8 @@ export type TopPeople =
       usageTotal: number;
       unattributedCost: number;
       peopleCount: number;
+      // Set when ranked from a leaderboard export, which covers whole periods.
+      leaderboardPeriod?: { start: string; end: string };
       rows: Array<{
         userId: string;
         email: string | null;
@@ -98,6 +100,13 @@ export function TopPeopleTable({ data }: { data: TopPeople }) {
         {data.unattributedCost > 0 && ` · $${data.unattributedCost.toFixed(2)} not attributed to anyone`}
         {" · "}seat fees excluded (same for everyone)
       </p>
+      {data.leaderboardPeriod && (
+        <p className="muted">
+          From the people leaderboard for {data.leaderboardPeriod.start.slice(0, 10)} to{" "}
+          {new Date(new Date(data.leaderboardPeriod.end).getTime() - 86400000).toISOString().slice(0, 10)},
+          which counts each leaderboard period in full even where it only partly overlaps the dates above.
+        </p>
+      )}
     </>
   );
 }
