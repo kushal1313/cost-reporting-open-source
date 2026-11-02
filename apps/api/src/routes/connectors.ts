@@ -1,3 +1,4 @@
+import { ingestionOf } from "@cost-reporting/connector-core";
 import { decryptJson, encryptJson, prisma } from "@cost-reporting/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -21,7 +22,8 @@ const seatPlanSchema = z.object({
   seatCount: z.number().int().positive().nullable(),
 });
 
-const importSchema = z.object({ content: z.string().min(1) });
+// Some exports carry their report type or period only in the file name.
+const importSchema = z.object({ content: z.string().min(1), fileName: z.string().optional() });
 
 // Exports for a month of per-user usage can run to several MB.
 const IMPORT_BODY_LIMIT = 25 * 1024 * 1024;
@@ -44,12 +46,16 @@ export async function connectorRoutes(app: FastifyInstance) {
         seatPricePerMonth: true,
         seatCount: true,
         createdAt: true,
+        // Read only to decide sync vs import below; never sent to the client.
+        encryptedConfig: true,
       },
     });
-    return instances.map((i) => ({
+    return instances.map(({ encryptedConfig, ...i }) => ({
       ...i,
       seatPricePerMonth: i.seatPricePerMonth == null ? null : Number(i.seatPricePerMonth),
-      ingestion: connectorRegistry.get(i.provider).ingestion ?? "api",
+      // A connector can sync or import depending on its config (ChatGPT: an
+      // admin key means sync), so this is decided per instance.
+      ingestion: ingestionOf(connectorRegistry.get(i.provider), decryptJson(encryptedConfig)),
     }));
   });
 
@@ -130,15 +136,20 @@ export async function connectorRoutes(app: FastifyInstance) {
   app.post("/connectors/:id/import", { bodyLimit: IMPORT_BODY_LIMIT }, async (req, reply) => {
     const { id } = idParamsSchema.parse(req.params);
     const { organizationId } = orgQuerySchema.parse(req.query);
-    const { content } = importSchema.parse(req.body);
+    const { content, fileName } = importSchema.parse(req.body);
     const instance = await prisma.connectorInstance.findFirst({
       where: { id, organizationId },
       select: { id: true },
     });
     if (!instance) return reply.code(404).send({ error: "Connector not found" });
     try {
-      const range = await importConnectorFile(id, content);
-      return reply.send({ status: "ok", start: range.start, end: range.end });
+      const { range, dataset } = await importConnectorFile(id, content, fileName);
+      return reply.send({
+        status: "ok",
+        start: range.start,
+        end: range.end,
+        dataset: dataset?.label ?? null,
+      });
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : "Import failed" });
     }

@@ -1,8 +1,11 @@
-import type {
-  CostConnector,
-  GroupCostRecord,
-  ImportResult,
-  UserActivityRecord,
+import {
+  ingestionOf,
+  type CostConnector,
+  type GroupCostRecord,
+  type ImportResult,
+  type UsageMetricRecord,
+  type UserActivityRecord,
+  type UserUsageRecord,
 } from "@cost-reporting/connector-core";
 import { decryptJson, prisma, type ConnectorInstance } from "@cost-reporting/db";
 import type { DateRange, FocusRecord } from "@cost-reporting/focus-schema";
@@ -125,37 +128,39 @@ async function resolveSeatCount(
   return seats;
 }
 
+interface IngestedData {
+  costs: FocusRecord[];
+  groupCosts?: GroupCostRecord[];
+  activity?: UserActivityRecord[];
+  userUsage?: UserUsageRecord[];
+  metrics?: UsageMetricRecord[];
+}
+
 /**
- * Replaces everything this connector instance stored for `range` — cost rows,
- * group costs and user activity — in one transaction, so readers (e.g. the
- * dashboard) never observe the brief window where old rows are gone but new
- * ones aren't in yet. Re-running for an overlapping range is idempotent rather
- * than accumulating duplicates.
+ * Stored data to replace, and what replaces it. With a `dataset`, only rows
+ * from that dataset are replaced, so an import of one report leaves the
+ * others' rows alone; without one, everything the instance stored for the
+ * range is.
+ */
+interface ReplacementPart {
+  dataset?: string;
+  data: IngestedData;
+}
+
+/**
+ * Replaces this connector instance's data for `range` — cost rows, group
+ * costs, user activity, per-period user usage and usage metrics — in one
+ * transaction, so readers (e.g. the dashboard) never observe the brief window
+ * where old rows are gone but new ones aren't in yet. Re-running for an
+ * overlapping range is idempotent rather than accumulating duplicates.
  */
 async function replaceConnectorData(
   instance: ConnectorInstance,
   range: DateRange,
-  data: { costs: FocusRecord[]; groupCosts: GroupCostRecord[]; activity: UserActivityRecord[] },
+  parts: ReplacementPart[],
 ): Promise<void> {
   const { organizationId, id: connectorInstanceId, provider } = instance;
-  const costRows = data.costs.map((r) => toCostRecordRow(organizationId, connectorInstanceId, r));
-  const groupRows = data.groupCosts.map((g) => ({
-    organizationId,
-    connectorInstanceId,
-    providerName: provider,
-    groupId: g.groupId,
-    groupName: g.groupName,
-    chargePeriodStart: g.chargePeriodStart,
-    chargePeriodEnd: g.chargePeriodEnd,
-    effectiveCost: g.effectiveCost,
-    billingCurrency: g.billingCurrency,
-  }));
-  const activityRows = data.activity.map((a) => ({
-    organizationId,
-    connectorInstanceId,
-    providerName: provider,
-    ...a,
-  }));
+  const owner = { organizationId, connectorInstanceId, providerName: provider };
 
   // Overlap test, not containment — a monthly-granularity record (e.g.
   // Datadog, or a seat fee) whose period isn't fully inside `range` would
@@ -164,22 +169,42 @@ async function replaceConnectorData(
   // that merely touches an edge (ends at range.start, or starts at range.end)
   // isn't re-fetched, so it must not be deleted.
   const overlapsRange = { chargePeriodStart: { lt: range.end }, chargePeriodEnd: { gt: range.start } };
+  const periodOverlapsRange = { periodStart: { lt: range.end }, periodEnd: { gt: range.start } };
 
   await prisma.$transaction(
     async (tx) => {
-      await tx.costRecord.deleteMany({ where: { connectorInstanceId, ...overlapsRange } });
-      await tx.groupCost.deleteMany({ where: { connectorInstanceId, ...overlapsRange } });
-      await tx.userActivity.deleteMany({
-        where: { connectorInstanceId, date: { gte: range.start, lt: range.end } },
-      });
-      for (let i = 0; i < costRows.length; i += BATCH_SIZE) {
-        await tx.costRecord.createMany({ data: costRows.slice(i, i + BATCH_SIZE) });
-      }
-      for (let i = 0; i < groupRows.length; i += BATCH_SIZE) {
-        await tx.groupCost.createMany({ data: groupRows.slice(i, i + BATCH_SIZE) });
-      }
-      for (let i = 0; i < activityRows.length; i += BATCH_SIZE) {
-        await tx.userActivity.createMany({ data: activityRows.slice(i, i + BATCH_SIZE) });
+      for (const { dataset, data } of parts) {
+        const scope = dataset === undefined ? { connectorInstanceId } : { connectorInstanceId, dataset };
+        const costRows = data.costs.map((r) => ({
+          ...toCostRecordRow(organizationId, connectorInstanceId, r),
+          dataset,
+        }));
+        const groupRows = (data.groupCosts ?? []).map((g) => ({ ...owner, ...g, dataset }));
+        const activityRows = (data.activity ?? []).map((a) => ({ ...owner, ...a, dataset }));
+        // UserUsage and UsageMetric rows only come from imports, which always name their dataset.
+        const usageRows = (data.userUsage ?? []).map((u) => ({ ...owner, ...u, dataset: dataset ?? "" }));
+        const metricRows = (data.metrics ?? []).map((m) => ({ ...owner, ...m, dataset: dataset ?? "" }));
+
+        await tx.costRecord.deleteMany({ where: { ...scope, ...overlapsRange } });
+        await tx.groupCost.deleteMany({ where: { ...scope, ...overlapsRange } });
+        await tx.userActivity.deleteMany({ where: { ...scope, date: { gte: range.start, lt: range.end } } });
+        await tx.userUsage.deleteMany({ where: { ...scope, ...periodOverlapsRange } });
+        await tx.usageMetric.deleteMany({ where: { ...scope, ...periodOverlapsRange } });
+        for (let i = 0; i < costRows.length; i += BATCH_SIZE) {
+          await tx.costRecord.createMany({ data: costRows.slice(i, i + BATCH_SIZE) });
+        }
+        for (let i = 0; i < groupRows.length; i += BATCH_SIZE) {
+          await tx.groupCost.createMany({ data: groupRows.slice(i, i + BATCH_SIZE) });
+        }
+        for (let i = 0; i < activityRows.length; i += BATCH_SIZE) {
+          await tx.userActivity.createMany({ data: activityRows.slice(i, i + BATCH_SIZE) });
+        }
+        for (let i = 0; i < usageRows.length; i += BATCH_SIZE) {
+          await tx.userUsage.createMany({ data: usageRows.slice(i, i + BATCH_SIZE) });
+        }
+        for (let i = 0; i < metricRows.length; i += BATCH_SIZE) {
+          await tx.usageMetric.createMany({ data: metricRows.slice(i, i + BATCH_SIZE) });
+        }
       }
     },
     { timeout: 60_000 },
@@ -192,11 +217,11 @@ async function replaceConnectorData(
  */
 async function runIngestion(
   instance: ConnectorInstance,
-  load: () => Promise<{ range: DateRange; data: Omit<ImportResult, "range"> }>,
+  load: () => Promise<{ range: DateRange; parts: ReplacementPart[] }>,
 ): Promise<DateRange> {
   try {
-    const { range, data } = await load();
-    await replaceConnectorData(instance, range, data);
+    const { range, parts } = await load();
+    await replaceConnectorData(instance, range, parts);
     await prisma.connectorInstance.update({
       where: { id: instance.id },
       data: { status: "ACTIVE", lastSyncAt: new Date(), lastSyncError: null },
@@ -223,28 +248,37 @@ export async function syncConnectorInstance(
   const range = toWholeDays(requested);
   const instance = await prisma.connectorInstance.findUniqueOrThrow({ where: { id: connectorInstanceId } });
   const connector = connectorRegistry.get(instance.provider);
-  if (connector.ingestion === "file") {
+  const config = decryptJson(instance.encryptedConfig);
+  if (ingestionOf(connector, config) === "file") {
     throw new Error(`${connector.displayName} is updated by importing an export file, not by syncing`);
   }
-  const config = decryptJson(instance.encryptedConfig);
 
   await runIngestion(instance, async () => {
-    const [costs, groupCosts, activity, seats] = await Promise.all([
+    const [costs, groupCosts, activity, metrics, seats] = await Promise.all([
       collect(connector.syncCosts(config, range)),
       collect(connector.syncGroupCosts?.(config, range)),
       collect(connector.syncUserActivity?.(config, range)),
+      collect(connector.syncMetrics?.(config, range)),
       resolveSeatCount(instance, connector, config),
     ]);
     if (seats != null)
       costs.push(
         ...seatFeeRecords(instance, connector.provider as FocusRecord["ProviderName"], seats, range),
       );
-    return { range, data: { costs, groupCosts, activity } };
+    return { range, parts: [{ data: { costs, groupCosts, activity, metrics } }] };
   });
 }
 
-/** Stores one uploaded export for a "file" connector instance. */
-export async function importConnectorFile(connectorInstanceId: string, content: string): Promise<DateRange> {
+/**
+ * Stores one uploaded export for a "file" connector instance. A file that
+ * names its dataset replaces only that dataset's rows; seat fees are their own
+ * dataset, rebooked for the file's dates on every import.
+ */
+export async function importConnectorFile(
+  connectorInstanceId: string,
+  content: string,
+  fileName?: string,
+): Promise<{ range: DateRange; dataset?: ImportResult["dataset"] }> {
   const instance = await prisma.connectorInstance.findUniqueOrThrow({ where: { id: connectorInstanceId } });
   const connector = connectorRegistry.get(instance.provider);
   const parseImport = connector.parseImport?.bind(connector);
@@ -252,16 +286,30 @@ export async function importConnectorFile(connectorInstanceId: string, content: 
     throw new Error(`${connector.displayName} doesn't support file import`);
   }
   const config = decryptJson(instance.encryptedConfig);
+  // A sync replaces everything in its range, so an import into a syncing
+  // connector would either double count or be wiped by the next sync.
+  if (ingestionOf(connector, config) === "api") {
+    throw new Error(`This ${connector.displayName} connector syncs from the provider's API, not from files`);
+  }
 
-  return runIngestion(instance, async () => {
-    const parsed = parseImport(config, content);
-    const range = toWholeDays(parsed.range);
+  let dataset: ImportResult["dataset"];
+  const range = await runIngestion(instance, async () => {
+    const { range: fileRange, dataset: parsedDataset, ...data } = parseImport(config, content, fileName);
+    dataset = parsedDataset;
+    const range = toWholeDays(fileRange);
     const seats = await resolveSeatCount(instance, connector, config);
-    const costs = [...parsed.costs];
-    if (seats != null)
-      costs.push(
-        ...seatFeeRecords(instance, connector.provider as FocusRecord["ProviderName"], seats, range),
-      );
-    return { range, data: { costs, groupCosts: parsed.groupCosts, activity: parsed.activity } };
+    const seatCosts =
+      seats == null
+        ? []
+        : seatFeeRecords(instance, connector.provider as FocusRecord["ProviderName"], seats, range);
+    if (!dataset) return { range, parts: [{ data: { ...data, costs: [...data.costs, ...seatCosts] } }] };
+    return {
+      range,
+      parts: [
+        { dataset: dataset.key, data },
+        { dataset: "seats", data: { costs: seatCosts } },
+      ],
+    };
   });
+  return { range, dataset };
 }

@@ -25,7 +25,7 @@ const PROVIDER_LABELS: Record<(typeof PROVIDERS)[number], string> = {
   Datadog: "Datadog",
   GrafanaCloud: "Grafana Cloud",
   Anthropic: "Claude Enterprise",
-  OpenAI: "ChatGPT Enterprise / Business (CSV import)",
+  OpenAI: "ChatGPT Enterprise / Business",
 };
 
 const CONFIG_PLACEHOLDER: Record<(typeof PROVIDERS)[number], string> = {
@@ -35,8 +35,11 @@ const CONFIG_PLACEHOLDER: Record<(typeof PROVIDERS)[number], string> = {
   // Analytics API key (read:analytics), created by the primary owner at
   // claude.ai > Organization settings > API.
   Anthropic: '{\n  "apiKey": "...",\n  "organizationName": "Acme"\n}',
-  // creditPriceUsd is only needed when the export reports credits, not dollars.
-  OpenAI: '{\n  "workspaceName": "Acme",\n  "creditPriceUsd": 0.04\n}',
+  // With adminKey + workspaceId the connector syncs from the Admin API; leave
+  // them out to import admin console CSV exports instead. creditPriceUsd is
+  // the contract's USD per credit.
+  OpenAI:
+    '{\n  "adminKey": "sk-admin-...",\n  "workspaceId": "<workspace UUID>",\n  "workspaceName": "Acme",\n  "creditPriceUsd": 0.04\n}',
 };
 
 function seatPlanSummary(c: ConnectorInstance): string {
@@ -169,14 +172,29 @@ export default function ConnectorsPage() {
     });
   }
 
-  function handleImport(id: string, file: File) {
+  // Each file is its own import, so one bad file doesn't stop the rest; the
+  // message lists how each went.
+  function handleImport(id: string, files: File[]) {
     return runRowAction(async () => {
-      const result = await api.post<{ start: string; end: string }>(
-        `/connectors/${id}/import?organizationId=${organizationId}`,
-        { content: await file.text() },
-      );
-      const last = new Date(new Date(result.end).getTime() - 86400000);
-      return `Imported ${file.name}: ${result.start.slice(0, 10)} to ${last.toISOString().slice(0, 10)}.`;
+      const lines: string[] = [];
+      let failed = 0;
+      for (const file of files) {
+        try {
+          const result = await api.post<{ start: string; end: string; dataset: string | null }>(
+            `/connectors/${id}/import?organizationId=${organizationId}`,
+            { content: await file.text(), fileName: file.name },
+          );
+          const last = new Date(new Date(result.end).getTime() - 86400000);
+          lines.push(
+            `✓ ${file.name}${result.dataset ? ` (${result.dataset})` : ""}: ${result.start.slice(0, 10)} to ${last.toISOString().slice(0, 10)}`,
+          );
+        } catch (err) {
+          failed++;
+          lines.push(`✗ ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (failed > 0) throw new Error(lines.join("\n"));
+      return lines.join("\n");
     });
   }
 
@@ -273,15 +291,16 @@ export default function ConnectorsPage() {
                     <td style={{ display: "flex", gap: 8 }}>
                       {c.ingestion === "file" ? (
                         <label className="button">
-                          Import CSV
+                          Import CSVs
                           <input
                             type="file"
                             accept=".csv,text/csv"
+                            multiple
                             hidden
                             onChange={(e) => {
-                              const file = e.target.files?.[0];
+                              const files = [...(e.target.files ?? [])];
                               e.target.value = "";
-                              if (file) handleImport(c.id, file);
+                              if (files.length > 0) handleImport(c.id, files);
                             }}
                           />
                         </label>
@@ -319,7 +338,11 @@ export default function ConnectorsPage() {
             </tbody>
           </table>
         )}
-        {rowMessage && <p style={{ color: rowMessage.ok ? undefined : "#e2626b" }}>{rowMessage.text}</p>}
+        {rowMessage && (
+          <p style={{ color: rowMessage.ok ? undefined : "#e2626b", whiteSpace: "pre-line" }}>
+            {rowMessage.text}
+          </p>
+        )}
       </div>
 
       <div className="card">
