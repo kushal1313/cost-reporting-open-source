@@ -30,10 +30,14 @@ function buildCostRecordWhere(
   scopeFilter: Record<string, unknown>,
   range: { start: Date; end: Date },
 ) {
+  // Overlap, not containment — same rule as the dashboard's cost queries, so a
+  // record whose period doesn't align to the budget period (e.g. a Grafana
+  // invoice spanning the 15th–15th) still counts instead of silently vanishing.
+  // An overlapping record is counted in full; pro-rating is a separate change.
   const where: Record<string, unknown> = {
     organizationId,
-    chargePeriodStart: { gte: range.start },
-    chargePeriodEnd: { lte: range.end },
+    chargePeriodStart: { lt: range.end },
+    chargePeriodEnd: { gt: range.start },
   };
   if (typeof scopeFilter.providerName === "string") where.providerName = scopeFilter.providerName;
   if (typeof scopeFilter.serviceCategory === "string") where.serviceCategory = scopeFilter.serviceCategory;
@@ -87,8 +91,8 @@ export async function evaluateBudget(budgetId: string): Promise<BudgetEvaluation
   return { budgetId, spend, percentUsed };
 }
 
-export async function evaluateAllBudgets(): Promise<BudgetEvaluation[]> {
-  const budgets = await prisma.budget.findMany({ select: { id: true } });
+export async function evaluateAllBudgets(organizationId: string): Promise<BudgetEvaluation[]> {
+  const budgets = await prisma.budget.findMany({ where: { organizationId }, select: { id: true } });
   const results: BudgetEvaluation[] = [];
   for (const b of budgets) {
     results.push(await evaluateBudget(b.id));

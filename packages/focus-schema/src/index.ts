@@ -18,6 +18,8 @@ export const ProviderName = z.enum([
   "GrafanaCloud",
   "Snowflake",
   "Databricks",
+  "Anthropic",
+  "OpenAI",
 ]);
 export type ProviderName = z.infer<typeof ProviderName>;
 
@@ -67,6 +69,12 @@ export const FocusRecordSchema = z.object({
 
   // Freeform
   Tags: z.record(z.string()).default({}),
+
+  // x_ extension columns (FOCUS allows provider/consumer-defined columns with
+  // this prefix): the person a charge is attributed to, for per-user AI tools.
+  x_UserId: z.string().optional(),
+  x_UserEmail: z.string().optional(),
+  x_UserName: z.string().optional(),
 });
 export type FocusRecord = z.infer<typeof FocusRecordSchema>;
 

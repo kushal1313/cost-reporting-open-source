@@ -9,7 +9,9 @@ import { organizationRoutes } from "./routes/organizations.js";
 
 const app = Fastify({ logger: true });
 
-await app.register(cors, { origin: true });
+// @fastify/cors only allows GET/HEAD/POST by default, which silently blocks the
+// web app's DELETE calls (removing connectors, budgets, channels) at preflight.
+await app.register(cors, { origin: true, methods: ["GET", "HEAD", "POST", "DELETE"] });
 
 await app.register(healthRoutes);
 await app.register(organizationRoutes);

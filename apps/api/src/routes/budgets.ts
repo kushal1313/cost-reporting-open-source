@@ -20,9 +20,22 @@ const createAlertRuleSchema = z.object({
   thresholdPercent: z.number().int().min(1).max(500).optional(),
 });
 
+const orgQuerySchema = z.object({ organizationId: z.string() });
+const idParamsSchema = z.object({ id: z.string() });
+
+/**
+ * Routes keyed by a budget id also require the caller's organizationId and
+ * only match budgets in that org — an id alone must never reach another org's
+ * data. Returns null (caller replies 404) rather than revealing that the id
+ * exists elsewhere.
+ */
+async function findOrgBudget(id: string, organizationId: string) {
+  return prisma.budget.findFirst({ where: { id, organizationId }, select: { id: true } });
+}
+
 export async function budgetRoutes(app: FastifyInstance) {
   app.get("/budgets", async (req) => {
-    const { organizationId } = z.object({ organizationId: z.string() }).parse(req.query);
+    const { organizationId } = orgQuerySchema.parse(req.query);
     return prisma.budget.findMany({
       where: { organizationId },
       include: {
@@ -39,22 +52,35 @@ export async function budgetRoutes(app: FastifyInstance) {
     return reply.code(201).send(budget);
   });
 
-  app.get("/budgets/:id/status", async (req) => {
-    const { id } = z.object({ id: z.string() }).parse(req.params);
+  app.get("/budgets/:id/status", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const { organizationId } = orgQuerySchema.parse(req.query);
+    if (!(await findOrgBudget(id, organizationId))) {
+      return reply.code(404).send({ error: "Budget not found" });
+    }
     return evaluateBudget(id);
   });
 
   app.post("/budgets/:id/alert-rules", async (req, reply) => {
-    const { id } = z.object({ id: z.string() }).parse(req.params);
+    const { id } = idParamsSchema.parse(req.params);
+    const { organizationId } = orgQuerySchema.parse(req.query);
     const body = createAlertRuleSchema.parse(req.body);
 
-    const channel = await prisma.notificationChannel.findUnique({
-      where: { id: body.notificationChannelId },
+    if (!(await findOrgBudget(id, organizationId))) {
+      return reply.code(404).send({ error: "Budget not found" });
+    }
+
+    // The channel must belong to the budget's org, otherwise one org's budget
+    // alerts could be routed to (and leak spend figures into) another org's
+    // Slack/email/webhook.
+    const channel = await prisma.notificationChannel.findFirst({
+      where: { id: body.notificationChannelId, organizationId },
+      select: { id: true },
     });
     if (!channel) {
-      return reply
-        .code(400)
-        .send({ error: `No notification channel with id "${body.notificationChannelId}"` });
+      return reply.code(400).send({
+        error: `No notification channel with id "${body.notificationChannelId}" in this organization`,
+      });
     }
 
     const rule = await prisma.alertRule.create({ data: { budgetId: id, ...body } });
@@ -62,13 +88,16 @@ export async function budgetRoutes(app: FastifyInstance) {
   });
 
   app.delete("/budgets/:id", async (req, reply) => {
-    const { id } = z.object({ id: z.string() }).parse(req.params);
-    await prisma.budget.delete({ where: { id } });
+    const { id } = idParamsSchema.parse(req.params);
+    const { organizationId } = orgQuerySchema.parse(req.query);
+    const { count } = await prisma.budget.deleteMany({ where: { id, organizationId } });
+    if (count === 0) return reply.code(404).send({ error: "Budget not found" });
     return reply.code(204).send();
   });
 
   // Manual trigger for now; wire this to a scheduler (cron/Temporal) in production.
-  app.post("/budgets/evaluate", async () => {
-    return evaluateAllBudgets();
+  app.post("/budgets/evaluate", async (req) => {
+    const { organizationId } = orgQuerySchema.parse(req.query);
+    return evaluateAllBudgets(organizationId);
   });
 }

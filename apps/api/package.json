@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@cost-reporting/connector-aws": "*",
+    "@cost-reporting/connector-chatgpt-enterprise": "*",
+    "@cost-reporting/connector-claude-enterprise": "*",
     "@cost-reporting/connector-core": "*",
     "@cost-reporting/connector-datadog": "*",
     "@cost-reporting/connector-grafana-cloud": "*",

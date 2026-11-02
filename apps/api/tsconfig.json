@@ -11,6 +11,8 @@
     { "path": "../../packages/focus-schema" },
     { "path": "../../packages/connectors/core" },
     { "path": "../../packages/connectors/aws" },
+    { "path": "../../packages/connectors/chatgpt-enterprise" },
+    { "path": "../../packages/connectors/claude-enterprise" },
     { "path": "../../packages/connectors/datadog" },
     { "path": "../../packages/connectors/grafana-cloud" },
     { "path": "../../packages/db" },

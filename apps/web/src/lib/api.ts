@@ -3,7 +3,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    // Only declare JSON when there is a body: Fastify rejects a request whose
+    // Content-Type is application/json but whose body is empty (e.g. DELETE).
+    headers: { ...(init?.body !== undefined && { "Content-Type": "application/json" }), ...init?.headers },
   });
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status} ${await res.text()}`);
