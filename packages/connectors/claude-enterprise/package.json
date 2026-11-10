@@ -10,7 +10,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.3.0",
+    "@anthropic-ai/sdk": "^1.6.0",
     "@cost-reporting/connector-core": "*",
     "@cost-reporting/focus-schema": "*"
   },
